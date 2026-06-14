@@ -293,6 +293,14 @@ label.btn-mini{ cursor:pointer; display:inline-block; border-color:var(--borda);
 ::-webkit-scrollbar{ width:9px; height:9px; } ::-webkit-scrollbar-thumb{ background:var(--borda); border-radius:9px; } ::-webkit-scrollbar-track{ background:transparent; }
 #toast{ position:fixed; bottom:1.5rem; left:50%; transform:translateX(-50%) translateY(160%); background:var(--madeira-2); border:1px solid var(--brasa); color:var(--creme); padding:.7rem 1.2rem; border-radius:30px; font-size:.88rem; z-index:80; transition:transform .3s; box-shadow:var(--sombra); }
 #toast.show{ transform:translateX(-50%) translateY(0); }
+.comandas-top{ display:flex; align-items:center; justify-content:space-between; margin-bottom:.4rem; }
+.comandas-top span{ font-size:.72rem; font-weight:700; text-transform:uppercase; letter-spacing:.5px; color:var(--mudo); }
+.btn-refresh{ background:rgba(245,179,1,.1); border:1px solid var(--brasa); color:var(--brasa); border-radius:9px; padding:.3rem .6rem; font-size:.78rem; font-weight:700; cursor:pointer; transition:.15s; }
+.btn-refresh:hover{ background:rgba(245,179,1,.2); }
+.btn-refresh:active{ transform:translateY(1px); }
+.btn-refresh.girando, .btn-mini.girando{ opacity:.6; }
+.btn-refresh.girando{ animation:girar .8s linear infinite; }
+@keyframes girar{ to{ transform:rotate(360deg); } }
 /* ===== Calculadora de Ponto de Equilíbrio (tema escuro PDV) ===== */
 .pe-calc{ max-width:880px; margin:0 auto; color:var(--creme); font-family:'Inter',system-ui,sans-serif; line-height:1.45; }
 .pe-calc *,.pe-calc *::before,.pe-calc *::after{ box-sizing:border-box; }
@@ -518,7 +526,7 @@ label.btn-mini{ cursor:pointer; display:inline-block; border-color:var(--borda);
       </select></div>
     <div class="relogio"><span id="relogio-hora">00:00:00</span><small id="relogio-data">—</small></div>
     <div class="dir">
-      <span class="user-chip">👤 <span id="user-nome"></span> <span class="badge-papel" id="user-papel"></span> <span id="cloud-status" style="font-size:.7rem;color:var(--mudo)">…</span></span>
+      <span class="user-chip">👤 <span id="user-nome"></span> <span class="badge-papel" id="user-papel"></span> <span id="cloud-status" onclick="Cloud.reconectar()" style="font-size:.7rem;color:var(--mudo);cursor:pointer">…</span></span>
       <button class="btn-ghost" id="btn-cotacao" onclick="Cotacao.abrir()">💲 Cotação</button>
       <button class="btn-ghost" id="btn-fechamento" onclick="Fechamento.abrir()">📊 Fechamento</button>
       <button class="btn-ghost btn-vermelho" onclick="App.sair()">Sair</button>
@@ -547,6 +555,7 @@ label.btn-mini{ cursor:pointer; display:inline-block; border-color:var(--borda);
           <div class="cardapio" id="cardapio"></div>
         </section>
         <aside class="painel">
+          <div class="comandas-top"><span>Comandas abertas</span><button class="btn-refresh" onclick="App.atualizarComandas(this)">🔄 Atualizar</button></div>
           <div class="comandas-bar" id="comandas-bar"></div>
           <div class="pedido-head">COMANDA <span id="pedido-numero">—</span> <span style="color:var(--mudo);font-weight:400">•</span> <span id="pedido-origem">Mesa 1</span></div>
           <input id="pedido-cliente" class="cliente-input" type="text" placeholder="👤 Cliente / nome (opcional)">
@@ -607,7 +616,7 @@ label.btn-mini{ cursor:pointer; display:inline-block; border-color:var(--borda);
       <div class="tela-cheia"><div class="painel">
         <div class="dicas"><span class="lampada">🛡️</span><span class="texto">Modo administrador (Ademar): gerencie comandas abertas e pedidos finalizados dos dois caixas. O admin não realiza vendas.</span></div>
         <div class="painel-head"><div><h2>🧾 Comandas abertas</h2><p class="painel-hint" id="com-resumo">—</p></div>
-          <button class="btn-mini" style="border-color:rgba(245,179,1,.5);color:var(--brasa)" onclick="ComandasAdmin.resetar()">🔄 Resetar comandas</button></div>
+          <div style="display:flex;gap:.4rem"><button class="btn-mini azul" onclick="App.atualizarComandas(this)">🔄 Atualizar</button><button class="btn-mini" style="border-color:rgba(245,179,1,.5);color:var(--brasa)" onclick="ComandasAdmin.resetar()">🔄 Resetar comandas</button></div></div>
         <div style="max-height:30vh;overflow-y:auto;margin-bottom:.9rem"><table class="tabela"><thead><tr><th>Nº</th><th>Origem</th><th>Cliente</th><th>Itens</th><th class="r">Total</th><th></th></tr></thead><tbody id="com-tbody"></tbody></table></div>
         <div class="painel-head"><div><h2>📋 Pedidos finalizados</h2><p class="painel-hint" id="ped-resumo">—</p></div>
           <button class="btn-mini" onclick="Pedidos.limparTudo()">🗑 Excluir todos</button></div>
@@ -866,29 +875,57 @@ const FIREBASE_CONFIG = {
   appId: "1:577396430797:web:712fd34473cfb7a7d55684",
   measurementId: "G-9YTXVLHJ7M"
 };
-const Cloud = {
-  ativo:false, db:null, onChange:null, _json:{},
-  col(){ return this.db.collection("pdv"); },
-  status(txt, ok){ const e=document.getElementById("cloud-status"); if(e){ e.textContent=txt; e.style.color= ok?"var(--verde)":"var(--mudo)"; } },
-  async iniciar(onChange){
-    this.onChange=onChange||function(){};
+/* Injeta um script e espera carregar (ou falhar) */
+function _injetarScript(src){ return new Promise((resolve,reject)=>{ const s=document.createElement("script"); s.src=src; s.async=false; s.onload=()=>resolve(true); s.onerror=()=>reject(new Error(src)); document.head.appendChild(s); }); }
+/* Garante o SDK do Firebase: tenta o Google; se falhar, tenta um CDN alternativo */
+async function garantirSDK(){
+  if(window.firebase && firebase.firestore) return true;
+  const fontes=["https://www.gstatic.com/firebasejs/10.12.5/","https://cdn.jsdelivr.net/npm/firebase@10.12.5/"];
+  for(const base of fontes){
     try{
-      if(!window.firebase || !firebase.initializeApp) throw new Error("SDK não carregou (sem internet?)");
-      firebase.initializeApp(FIREBASE_CONFIG);
-      this.db=firebase.firestore();
-      // carga inicial
+      if(!(window.firebase && firebase.initializeApp)) await _injetarScript(base+"firebase-app-compat.js");
+      if(!(window.firebase && firebase.firestore)) await _injetarScript(base+"firebase-firestore-compat.js");
+      if(window.firebase && firebase.firestore) return true;
+    }catch(e){ console.warn("Fonte Firebase indisponível:", e.message); }
+  }
+  return !!(window.firebase && firebase.firestore);
+}
+const Cloud = {
+  ativo:false, db:null, onChange:null, _json:{}, _retry:null,
+  col(){ return this.db.collection("pdv"); },
+  status(txt, ok){ const e=document.getElementById("cloud-status"); if(e){ e.textContent=txt; e.style.color= ok?"var(--verde)":"var(--mudo)"; e.style.cursor="pointer"; e.title="Toque para reconectar à nuvem"; } },
+  async iniciar(onChange){ this.onChange=onChange||function(){};
+    await this.conectar();
+    window.addEventListener("online", ()=>{ if(!this.ativo) this.conectar(); });
+    return this.ativo; },
+  async conectar(){
+    if(this.ativo) return true;
+    this.status("⏳ Conectando…", false);
+    try{
+      const ok=await garantirSDK(); if(!ok) throw new Error("SDK não carregou (sem internet?)");
+      if(!firebase.apps || !firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
+      if(!this.db){ this.db=firebase.firestore();
+        try{ this.db.settings({ experimentalForceLongPolling:true }); }catch(e){ console.warn("settings:", e&&e.message); } }
       const snap=await this.col().get();
       snap.forEach(d=>{ const dt=d.data()||{}; Store.cache[d.id]=dt.value; this._json[d.id]=JSON.stringify(dt.value); });
       Store.usarCache=true; this.ativo=true; this.status("☁️ Nuvem", true);
-      // tempo real
+      if(this._retry){ clearInterval(this._retry); this._retry=null; }
       this.col().onSnapshot(s=>{ let mudou=false;
         s.docChanges().forEach(ch=>{ const id=ch.doc.id; const v=(ch.doc.data()||{}).value; const j=JSON.stringify(v);
           if(this._json[id]!==j){ Store.cache[id]=v; this._json[id]=j; try{ localStorage.setItem(id, j); }catch(e){} mudou=true; } });
         if(mudou) this.onChange();
-      }, err=>{ console.warn("onSnapshot:", err&&err.message); });
-    }catch(e){ console.warn("Nuvem indisponível, usando armazenamento local:", e&&e.message); this.ativo=false; this.status("⚠️ Offline", false); }
-    return this.ativo;
+      }, err=>{ console.warn("onSnapshot (o Firestore tentará reconectar sozinho):", err&&err.message); });
+      if(this.onChange) this.onChange();
+      return true;
+    }catch(e){ console.warn("Nuvem indisponível, usando armazenamento local:", e&&e.message); this.ativo=false; this.status("⚠️ Offline — toque p/ reconectar", false); this.agendarRetry(); return false; }
   },
+  agendarRetry(){ if(this._retry) return; this._retry=setInterval(()=>{ if(!this.ativo) this.conectar(); else { clearInterval(this._retry); this._retry=null; } }, 12000); },
+  reconectar(){ Toast.mostrar("Reconectando à nuvem…"); this.conectar(); },
+  /* Busca documentos específicos na nuvem sob demanda (ex.: só as comandas) */
+  async puxar(keys){ if(!this.ativo) return false;
+    try{ for(const k of keys){ const doc=await this.col().doc(k).get(); const v=doc.exists?((doc.data()||{}).value):null;
+      Store.cache[k]=v; this._json[k]=JSON.stringify(v); try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){} }
+      return true; }catch(e){ console.warn("puxar falhou:", e&&e.message); return false; } },
   push(k,v){ if(!this.ativo) return; const j=JSON.stringify(v); if(this._json[k]===j) return; this._json[k]=j;
     this.col().doc(k).set({value:v}).catch(e=>console.warn("Falha ao salvar na nuvem:", e&&e.message)); }
 };
@@ -1238,6 +1275,17 @@ const App = {
     itens:JSON.parse(JSON.stringify(this.pedido.itens)), descontoPct:this.descontoPct, voucher:this.voucher,
     operador:this.usuario.nome, caixa:this.usuario.caixa, destino:this.pedido.destino||1, ts:new Date().toISOString() }; },
   trocarDestino(){ const selc=document.getElementById("sel-caixa-destino"); if(selc) this.pedido.destino=parseInt(selc.value,10)||1; },
+  /* Atualiza apenas as comandas (puxa da nuvem) sem recarregar o site todo */
+  async atualizarComandas(btn){
+    if(btn){ btn.classList.add("girando"); btn.disabled=true; }
+    let ok=true;
+    if(Cloud.ativo){ ok=await Cloud.puxar(["comandas","vendas"]); }
+    else { ok=await Cloud.conectar(); if(ok) await Cloud.puxar(["comandas","vendas"]); }
+    if(this.ehAdmin()){ if(typeof ComandasAdmin!=="undefined") ComandasAdmin.render(); if(typeof Pedidos!=="undefined") Pedidos.render(); }
+    else { this.renderComandasBar(); }
+    if(btn){ btn.classList.remove("girando"); btn.disabled=false; }
+    Toast.mostrar(ok?"Comandas atualizadas.":"Sem conexão com a nuvem. Toque em ☁️ para reconectar.");
+  },
   salvarComanda(){
     if(!this.pedido.itens.length){ Toast.mostrar("Adicione itens antes de salvar a comanda."); return; }
     this.pedido.cliente=document.getElementById("pedido-cliente").value.trim();

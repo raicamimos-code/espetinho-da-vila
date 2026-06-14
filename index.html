@@ -550,6 +550,10 @@ label.btn-mini{ cursor:pointer; display:inline-block; border-color:var(--borda);
           <div class="comandas-bar" id="comandas-bar"></div>
           <div class="pedido-head">COMANDA <span id="pedido-numero">—</span> <span style="color:var(--mudo);font-weight:400">•</span> <span id="pedido-origem">Mesa 1</span></div>
           <input id="pedido-cliente" class="cliente-input" type="text" placeholder="👤 Cliente / nome (opcional)">
+          <select id="sel-caixa-destino" class="cliente-input" onchange="App.trocarDestino()" style="display:none">
+            <option value="1">🧾 Enviar para o Caixa 1</option>
+            <option value="2">🧾 Enviar para o Caixa 2</option>
+          </select>
           <div id="ifood-box">
             <input id="ifood-num" type="text" placeholder="Nº do pedido iFood">
           </div>
@@ -1222,16 +1226,18 @@ const App = {
   comandasAbertas(){ return Store.get("comandas")||[]; },
   novaComanda(silencioso){
     if(!silencioso && this.pedido.itens.length && !this.pedido.salva && !confirm("Iniciar uma nova comanda? O pedido atual não salvo será descartado.")) return;
-    this.pedido={ numero:this.proximoNumero(), origem:"Mesa 1", cliente:"", ifoodNum:"", itens:[], salva:false };
+    this.pedido={ numero:this.proximoNumero(), origem:"Mesa 1", cliente:"", ifoodNum:"", itens:[], salva:false, destino:(this.usuario&&this.usuario.caixa)?this.usuario.caixa:1 };
     this.itemSel=null; this.descontoPct=0; this.voucher=null;
     const sel=document.getElementById("sel-origem"); if(sel) sel.value="Mesa 1";
+    const selc=document.getElementById("sel-caixa-destino"); if(selc){ selc.value=String(this.pedido.destino); selc.style.display=this.ehPedido()?"block":"none"; }
     document.getElementById("ifood-box").style.display="none";
     document.getElementById("ifood-num").value=""; document.getElementById("pedido-cliente").value="";
     this.renderPedido(); this.renderComandasBar();
   },
   snapshotComanda(){ return { numero:this.pedido.numero, origem:this.pedido.origem, cliente:this.pedido.cliente, ifoodNum:this.pedido.ifoodNum,
     itens:JSON.parse(JSON.stringify(this.pedido.itens)), descontoPct:this.descontoPct, voucher:this.voucher,
-    operador:this.usuario.nome, caixa:this.usuario.caixa, ts:new Date().toISOString() }; },
+    operador:this.usuario.nome, caixa:this.usuario.caixa, destino:this.pedido.destino||1, ts:new Date().toISOString() }; },
+  trocarDestino(){ const selc=document.getElementById("sel-caixa-destino"); if(selc) this.pedido.destino=parseInt(selc.value,10)||1; },
   salvarComanda(){
     if(!this.pedido.itens.length){ Toast.mostrar("Adicione itens antes de salvar a comanda."); return; }
     this.pedido.cliente=document.getElementById("pedido-cliente").value.trim();
@@ -1245,9 +1251,10 @@ const App = {
   carregarComanda(numero){
     if(this.pedido.itens.length && !this.pedido.salva && !confirm("A comanda atual não foi salva. Abrir outra vai descartá-la. Continuar?")) return;
     const c=this.comandasAbertas().find(x=>x.numero===numero); if(!c) return;
-    this.pedido={ numero:c.numero, origem:c.origem, cliente:c.cliente||"", ifoodNum:c.ifoodNum||"", itens:JSON.parse(JSON.stringify(c.itens)), salva:true };
+    this.pedido={ numero:c.numero, origem:c.origem, cliente:c.cliente||"", ifoodNum:c.ifoodNum||"", itens:JSON.parse(JSON.stringify(c.itens)), salva:true, destino:c.destino||1 };
     this.descontoPct=c.descontoPct||0; this.voucher=c.voucher||null; this.itemSel=null;
     const sel=document.getElementById("sel-origem"); if(sel) sel.value=c.origem;
+    const selc=document.getElementById("sel-caixa-destino"); if(selc){ selc.value=String(this.pedido.destino); selc.style.display=this.ehPedido()?"block":"none"; }
     document.getElementById("ifood-box").style.display=(c.origem==="iFood")?"flex":"none";
     document.getElementById("ifood-num").value=c.ifoodNum||""; document.getElementById("pedido-cliente").value=c.cliente||"";
     this.renderPedido(); this.renderComandasBar();
@@ -1258,7 +1265,8 @@ const App = {
     const nova=document.createElement("button"); nova.className="nova"; nova.innerHTML="＋ Nova"; nova.onclick=()=>this.novaComanda(); box.appendChild(nova);
     this.comandasAbertas().forEach(c=>{ const total=(c.itens||[]).reduce((s,i)=>s+i.preco*i.qtd,0)*(1-(c.descontoPct||0)/100);
       const b=document.createElement("button"); if(c.numero===this.pedido.numero) b.classList.add("ativa");
-      b.innerHTML=`<span class="cn">${this.fmtNum(c.numero)}</span><br>${esc(c.origem)}${c.cliente?(" • "+esc(c.cliente)):""} • ${moeda(total)}`;
+      const tag=c.destino?`<span style="color:var(--brasa)">→ Cx ${c.destino}</span> `:"";
+      b.innerHTML=`<span class="cn">${this.fmtNum(c.numero)}</span><br>${tag}${esc(c.origem)}${c.cliente?(" • "+esc(c.cliente)):""} • ${moeda(total)}`;
       b.onclick=()=>this.carregarComanda(c.numero); box.appendChild(b); });
   },
 
@@ -1623,7 +1631,7 @@ const ComandasAdmin = {
     document.getElementById("com-resumo").textContent=`${cs.length} comanda(s) aberta(s) • ${moeda(tot)} a receber`;
     if(!cs.length){ tb.innerHTML=`<tr><td colspan="6" style="color:var(--mudo)">Nenhuma comanda aberta.</td></tr>`; return; }
     cs.forEach(c=>{ const itens=(c.itens||[]).map(i=>`${i.qtd}x ${i.codigo}`).join(", ");
-      const tr=document.createElement("tr"); tr.innerHTML=`<td style="color:var(--brasa);font-weight:700">${esc(App.fmtNum(c.numero))}</td><td>${esc(c.origem||"")}</td><td>${esc(c.cliente||"")}</td><td>${esc(itens)}</td><td class="r">${moeda(this.totalC(c))}</td>
+      const tr=document.createElement("tr"); tr.innerHTML=`<td style="color:var(--brasa);font-weight:700">${esc(App.fmtNum(c.numero))}</td><td>${c.destino?'<span style="color:var(--brasa)">Cx '+c.destino+'</span> · ':''}${esc(c.origem||"")}</td><td>${esc(c.cliente||"")}</td><td>${esc(itens)}</td><td class="r">${moeda(this.totalC(c))}</td>
         <td class="r" style="white-space:nowrap"><button class="btn-mini azul" onclick="ComandasAdmin.reimprimir(${c.numero})">Reimprimir</button><button class="btn-mini" onclick="ComandasAdmin.excluir(${c.numero})">Excluir</button></td>`; tb.appendChild(tr); }); },
   reimprimir(n){ const c=this.lista().find(x=>x.numero===n); if(!c) return; Cupom.mostrar(Cupom.gerarDe(Object.assign({},c,{aberta:true})), "comanda_"+String(n).padStart(4,"0")); },
   excluir(n){ if(!confirm("Excluir a comanda "+App.fmtNum(n)+"?\nO número "+n+" ficará livre e será reutilizado na próxima comanda.")) return;
